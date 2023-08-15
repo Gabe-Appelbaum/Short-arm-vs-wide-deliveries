@@ -1,0 +1,273 @@
+---
+title: "Examining horizontal release as a way of trying to quantify short arm vs. wide release deliviers"
+author: "Gabriel Appelbaum"
+output: 
+  html_document:
+    code_folding: hide
+date: "2023-07-16"
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+INTRO
+
+A few months ago I had a conversation with a friend of mine who is a former major league pitcher. He talked about the differences between pitching motion and the benefits/drawbacks of a short arm motion versus a wider delivery. Some pitchers keep their windups shorter and their deliveries more compact by taking the ball almost directly back out of the glove and not extending fully. Consider that style the opposite to certain pitchers with wider deliveries who extend their arms further down and further back getting a full range of motion. Think of it as a bow and arrow vs. a trebuchet. The shorter delivery pitchers generally aren't able to generate the same kind of velocity yet his theory was that by hiding the ball better hitters aren't able to track it as early and have less time to react. This could create certain cases where low 90's from this delivery is as effective as high 90's from the wider and more drawn out deliveries.
+
+How about I show you some examples. One of the specific pitchers that started the whole conversation was Corey Kluber. Here's him in the playoff run, following his 2017 cy young campaign, getting a swinging strikeout against Aaron Judge on a 91.5 mph four-seamer.
+
+Kluber, 10-6-17, vs Judge
+
+Or for a more recent Cleveland pitcher who also fits the short-armer bill see Shane Bieber. Here he is getting a swing and miss from Francisco Lindor on a 91.8 mph four-seamer.
+
+Bieber, 5-21-23, vs lindor
+
+For an example of the opposite kind of pitcher see Ben Joyce. Here he is blowing 101.9 past Trey Mancini. Notice how far down and back he reaches.
+
+Joyce, 6-7-23, vs mancini
+
+I decided that this would be an excellent theory to try to investigate quantitatively and so here is my first attempt
+
+DATA
+
+Gathering data; The eternal first step. I wanted to gather statcast data for this project because I was hoping statcast would have data on pitcher deliveries. Unfortunately this is where I hit my first bump in the road because while statcast has data on release point it doesn't have data on how the pitchers reached that release point. Nonetheless I decided to trot on and use horizontal release point as an estimator of how compact the delivery is. From baseball savant I was able to get data from all of 2019, 2020, 2021, and 2022. I also included the 2023 season through July 1st. I set a minimum of 500 pitches total for each pitcher within the dataset. Then I grouped it by each pitch with a minimum of 100 instances of that pitch. So for example one row of data is all of Gerrit Cole's four-seam fastballs within this time period. For all of his four-seamers I have the average release point, the total run value, the woba, and the whiff percentage. These are the metrics I used for my analysis.
+
+One last important note is that I chose to limit my data to only righties. Horizontal release point is tracked from the catchers point of view. This means that a righty sidearmer's horizontal release will be about -4 which represents 4 feet towards third base. Opposite to this a wide release lefty would have a larger positive number for their release point. So In order to simplify the process I chose to analyze only righties.
+
+METHODS + RESULTS
+
+The first step I took is to create pitch type groups rather than consider each individual pitch type. All four-seam fastballs, sinkers, and cutters, are grouped as fastball. Changeups, splitters, and forkballs, are offspeed. Lastly, curves, knuckle-curves, sliders, sweepers, slurves, and slow curves, are breaking. Then I adjusted whiffs and run value to rate stats. Whiff percentage was calculated by dividing whiffs over swings, and I set run value to a per 100 pitch basis by dividing it by pitch and then multiplying by 100. Two important notes about run value is that the lower the value the better it is for the pitcher including into the negative values in some cases, and whenever you see run value discussed going forward it will be run value per 100 pitches rather than total run value.
+```{r}
+library(tidyverse)
+rp_data <- read_csv("release point 19-july 1 23.csv")
+
+# fix text of pitch types
+rep_string = c('FF4-Seam Fastball' = 'FF', 'SISinker' = 'SI', 'FCCutter' = 'FC', 'CUCurveball' = 'CU', 
+               'KCKnuckle Curve' = 'KC', 'FSSplit-Finger' = 'FS', 'SLSlider' = 'SL', 'SVSlurve' = 'SV', 
+               'CHChangeup' = 'CH', 'STSweeper' = 'ST', 'CSSlow Curve' = 'CS', 'FOForkball' = 'FO')
+rp_data$pitch_type <- str_replace_all(rp_data$pitch_type, rep_string)
+
+# next step, create a variable in the original dataframe that says which of the three types
+rp_data <- rp_data %>% mutate(pitch_type_group =
+                                case_when(pitch_type %in% c('FF', 'SI', 'FC') ~ "Fastball", 
+                                          pitch_type %in% c('CH', 'FS', 'FO') ~ "Offspeed",
+                                          pitch_type %in% c('CU', 'KC', 'SL', 'ST', 'SV', 'CS') ~ "Breaking")
+)
+
+# now add whiff percentage, whiffs per pitch, and adjust run value to be per 100 pitches
+rp_data <- rp_data %>%
+  mutate(whiff_pitch = whiffs / pitches) %>%
+  mutate(whiff_perc = whiffs / swings) %>%
+  mutate(rv_100 = (run_value / pitches) * 100)
+```
+
+Here is a plot of all release points to give you an idea of generally where the pitches are coming from. This is from the catchers POV so the further to the left on the chart the closer to third base. Again it is important to note that one dot represents the average release point for one pitch out of one pitchers arsenal. For example that one red dot represents the average release point of Shane Biebers four-seamer within the time window of my data set.
+```{r}
+sh_bieber <- rp_data %>% 
+  filter(player_name == "Bieber, Shane" & pitch_type == "FF")
+
+ggplot(rp_data, aes(horiz_release, vert_release)) + 
+  geom_point(color='black', fill='#1B9E77', shape = 21, size = 5, stroke = 1) +
+  geom_point(data = sh_bieber, aes(horiz_release, vert_release),
+             color = "black", fill = "red", shape = 21, size = 5, stroke = 1)+
+  theme_bw() +
+  labs(title = "RHP Release points from the catchers POV", x = "Horizontal release point in feet, (0 is the rubber and negative is towards third)", y = "Vertical release point in feet", color = "Pitch type group") +
+  coord_equal()
+
+#fill = "black", color = "#1B9E77"
+```
+
+The next step is to create separate data frames for each pitch type group. I did this to compare pitches to other similar pitches. Due to both their movements, and the situation's they are used in, different pitch types are inherently going to have vastly different results. This is what made me want to categorize and assess pitches in this manner.
+```{r}
+# fastballs
+fb_rp <- rp_data %>%
+  filter(pitch_type_group == "Fastball")
+
+# breaking
+brk_rp <- rp_data %>%
+  filter(pitch_type_group == "Breaking")
+
+# offspeed
+off_rp <- rp_data %>%
+  filter(pitch_type_group == "Offspeed")
+```
+
+Lets start by examining fastballs. I wanted to break up the pitches into bins by horizontal distance. I decided to create four bins and I did it in a way that makes it so that each bin has a similar amount of observations. I wanted to create bins this way so the mean stats of each bin wouldn't be overly affected by one or two observations.
+
+Next I created a new dataframe that features the mean and standard deviation of woba, run value per 100 pitches, and whiff percentage, for each bin. It also features the total observations per bin.
+```{r}
+# start by assigning bins
+fb_rp <- fb_rp %>% 
+  mutate(release_bin = cut_number(horiz_release,
+                               n = 4,
+                               right = F))
+
+# next we make a new data frame with the mean and sd by bins of woba, rv, whiff%
+fb_bin <- fb_rp %>%
+  group_by(release_bin) %>%
+  summarise(woba_mean = round(mean(woba), 3),
+            woba_sd = round(sd(woba), 3),
+            whiff_perc_mean = round(mean(whiff_perc), 3),
+            wp_sd = round(sd(whiff_perc), 3),
+            rv_mean = round(mean(rv_100), 3),
+            rv_sd = round(sd(rv_100), 3),
+            total_observations = n()) %>%
+  as.data.frame()
+
+DT::datatable(fb_bin)
+
+
+```
+
+Rather than stare at raw numbers I decided to create bar graphs. The x-axis displays the range of each of the horizontal release bins and the y-axis displays the mean of each stat. What you can see is that all stats favor the widest release point but one more so than others. WOBA and whiff percentage in the widest bin are slightly better than in other bins but run value is where a serious difference can be seen. The widest release point has a significantly lower mean of run value per 100 pitches (negative run value is good for the pitcher, positive run value is bad for the pitcher) but interestingly the worst bin for run value is the second widest. This suggests to me that in order to maximize your fastballs effectiveness you're best off releasing it wider and maximizing velocity; which works against my theory that a tightly released, and slower, but well hidden fastball could be just as effective.
+```{r}
+ggplot(fb_bin, aes(release_bin, woba_mean)) + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = woba_mean), vjust = 2, colour = "white") + 
+  labs(title = "Mean WOBA for fastballs by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean WOBA")
+
+ggplot(fb_bin, aes(release_bin, whiff_perc_mean)) + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = whiff_perc_mean), vjust = 2, colour = "white") + 
+  labs(title = "Mean Whiff% for fastballs by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean whiff%")
+
+ggplot(fb_bin, aes(release_bin, rv_mean))  + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = rv_mean), vjust = 2, colour = "white") + 
+  labs(title = "Mean run value per 100 pitches for fastball by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean RV/100 pitches")
+```
+
+Now that we've looked at fastballs it's time to analyze breaking pitches. I ran the exact same process as before. Splitting the data into four bins of relatively equal size and then observing the mean of each stat by each bin. 
+```{r}
+# start by assigning bins
+brk_rp <- brk_rp %>% 
+  mutate(release_bin = cut_number(horiz_release,
+                               n = 4,
+                               right = F))
+
+brk_bin <- brk_rp %>%
+  group_by(release_bin) %>%
+  summarise(woba_mean = round(mean(woba), 3),
+            woba_sd = round(sd(woba), 3),
+            whiff_perc_mean = round(mean(whiff_perc), 3),
+            wp_sd = round(sd(whiff_perc), 3),
+            rv_mean = round(mean(rv_100), 3),
+            rv_sd = round(sd(rv_100), 3),
+            total_observations = n()) %>%
+  as.data.frame()
+
+DT::datatable(brk_bin)
+
+```
+
+Now we again visualize these means and here we see to some degree the opposite of the effect that we saw for fastballs. WOBA and whiff percentage are mostly the same across release points. The tightest release point has a slightly favorable WOBA but a slightly less favorable whiff percentage. However run value is again where a serious difference can be seen. The two tightest release points both have negative mean values, and the single tightest release point bin has by far the lowest run value with a -0.185 compared to the next lowest being just below 0.
+```{r}
+ggplot(brk_bin, aes(release_bin, woba_mean)) + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = woba_mean), vjust = 2, colour = "white") + 
+  labs(title = "Mean WOBA for breaking pitches by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean WOBA")
+
+ggplot(brk_bin, aes(release_bin, whiff_perc_mean)) + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = whiff_perc_mean), vjust = 2, colour = "white") +
+  labs(title = "Mean Whiff% for breaking pitches by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean whiff%")
+
+ggplot(brk_bin, aes(release_bin, rv_mean))  + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = rv_mean), position = position_stack(vjust = 0.5), colour = "white") + 
+  labs(title = "Mean run value per 100 breaking pitches by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean RV/100 pitches")
+```
+
+Finally the same process for offspeed pitches.
+```{r}
+# start by assigning bins
+off_rp <- off_rp %>% 
+  mutate(release_bin = cut_number(horiz_release,
+                               n = 4,
+                               right = F))
+
+off_bin <- off_rp %>%
+  group_by(release_bin) %>%
+  summarise(woba_mean = round(mean(woba), 3),
+            woba_sd = round(sd(woba), 3),
+            whiff_perc_mean = round(mean(whiff_perc), 3),
+            wp_sd = round(sd(whiff_perc), 3),
+            rv_mean = round(mean(rv_100), 3),
+            rv_sd = round(sd(rv_100), 3),
+            total_observations = n()) %>%
+  as.data.frame()
+
+DT::datatable(off_bin)
+```
+
+These graphs suggest that offspeed pitches operate in a similar way as breaking. A tighter release is slightly better in both WOBA (just like breaking pitches), and whiff percentage (which is a difference from breaking pitches). Run value is also better in tighter releases but the distribution here is also unique. Only the narrowest release bin has a negative mean run value and the other three bins are all very similar. This makes intuitive sense on offspeed pitches because they are thrown by twisting your hand so the ball faces away from the pitcher on release which is an action that could hurt the accuracy of the pitch if the ball is released far away from the body.
+```{r}
+ggplot(off_bin, aes(release_bin, woba_mean)) + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = woba_mean), vjust = 2, colour = "white") + 
+  labs(title = "Mean WOBA for off-speed pitches by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean WOBA")
+
+ggplot(off_bin, aes(release_bin, whiff_perc_mean, fill = factor(whiff_perc_mean)))  + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = whiff_perc_mean), vjust = 2, colour = "white") + 
+  labs(title = "Mean Whiff% for off-speed pitches by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean Whiff%")
+
+ggplot(off_bin, aes(release_bin, rv_mean, fill = factor(rv_mean)))   + 
+  geom_col(fill = "#756bb1") +
+  theme_bw() + 
+  geom_text(aes(label = rv_mean), position = position_stack(vjust = 0.5), colour = "white") + 
+  labs(title = "Mean run value per 100 off-speed pitches by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean RV")
+```
+
+CONCLUSION + FLAWS
+
+So where does this leave me? I've found that for fastballs wider release points are more effective while the opposite is true for breaking and offspeed pitches. The unfortunate thing here is that release point doesn't correlate all that well with type of delivery. If you remember from the beginning of the article the goal here was to quantify advantages and disadvantages of short arm delivery v.s. wider more extended windups, but I wasn't able to find that kind of data. I thought that horizontal release point would be a decent indicator of what I was looking for but it comes short for two reasons.
+
+Horizontal release is measured from the rubber and not the pitcher himself, so it is swayed greatly by what position along the rubber a pitcher set up in/fell into. My hope was that the pitchers in the narrower horizontal release would be pitchers with more compact deliveries and lower velo fastballs. But the narrower release bins included a lot of pitchers with wide windeups and a high velo that fall towards first as they throw. For an example of narrow release, but wider windup and high velo, pitcher see Ryan Helsley. Within my data his four seam fastball has a 98.5 mph average, but with an average horizontal release of -0.44 feet his fastball falls into the narrowest release bin. See the video below of a 100.2 mph four-seamer that he blew by William Contreras as his whole body falls off the first base side of the mound. 
+
+Ryan helsley, 5-17-23, vs contreras
+
+And for the opposite effect see Max Scherzer. His windup is short-armed and compact but within my data his four-seamer averaged 94.3 and his horizontal release on that same pitch was an average of -3.27 feet. Below you can see why. On this 92.7 mph fastball he sets up as close to third as he can while still toeing the rubber.
+
+Max scherzer, 7-22-23, vs turner
+
+The data backs this up. If I analyze mean fastball velocity by bin the same way I analyzed other stats by bin earlier we can see that across release bins velocity is almost exactly the same. Three out of the four bins have the same average (93.1) and the one exception is the widest bin which includes side arm pitchers who are always going to throw a bit softer.
+```{r}
+fb_velo_bin <- fb_rp %>%
+  group_by(release_bin) %>%
+  summarise(velo_mean = round(mean(velocity), 1),
+            velo_sd = round(sd(velocity), 1),
+            total_observations = n()) %>%
+  as.data.frame()
+
+ggplot(fb_velo_bin, aes(release_bin, velo_mean)) +
+  geom_col(fill = "#756bb1") + 
+  theme_bw() + 
+  geom_text(aes(label = velo_mean), vjust = 2, colour = "white") + 
+  labs(title = "Mean fastball velocity by release bin", x = "Release bin (distance from the center of the rubber)", y = "Mean velo")  +
+  theme(axis.text.y=element_blank(),
+        axis.ticks.y=element_blank() 
+        )
+```
+
+The other reason that release misses capturing the windup is that despite winding up in very different ways most pitchers when they release the ball are just reaching for the plate. If I'm comparing one pitchers fastball to another pitchers fastball you're always going to see a lot of similarities because it's the same pitch. I was hoping horizontal release wouldn't fall in that category but turns out that it kind of does.
+
+One last thing I feel that I need to discuss is injuries. The short arm windup puts more stress on your elbow than shoulder and can lead to an increased risk of elbow injuries. See my poster boy Shane Bieber who was just placed on the 60 day IL with elbow inflammation.
+
+
+NEXT STEPS
+
+While this analysis doesn't quite touch on it I still feel like there is merit in the original goal of the research. If the statcast data that I want is ever publicly released I will be returning to this to try and quantify the value of these short armed and compact pitchers. They can certainly be effective, and whether that comes from hiding the ball better or delivering it quicker, there is real value here and it is worth further exploration. 
+
+For me personally my next step is to run a similar analysis but by pitcher rather than by pitch groups. What I found is that the tight releases were more effective for fastballs and that the opposite is true for non fastballs. Long standing traditional knowledge suggests that making all your pitches seem as similar as possible for as long as possible is the best way to fool hitters. If this is true it might be worth sacrificing some effectiveness on one pitch in order to throw all your pitches from the same place. My follow up to this project will be to combine each pitchers arsenal and see if some pitchers are able to do just that.
